@@ -21,7 +21,6 @@ except Exception as e:
     print(f"Error initializing Firebase: {e}")
     exit()
 
-
 # Get references to the database paths
 def get_daily_refs():
     today = datetime.date.today().isoformat()
@@ -29,7 +28,6 @@ def get_daily_refs():
         'system_usage_ref': db.reference(f'system_usage/{today}'),
         'app_usage_ref': db.reference(f'app_usage/{today}')
     }
-
 
 # Helper function to format seconds into HH:MM:SS
 def format_seconds_to_hms(seconds):
@@ -43,7 +41,6 @@ def format_seconds_to_hms(seconds):
     else:
         return f"{seconds}s"
 
-
 # --- Telegram Bot Functions ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -51,10 +48,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     message = (
         "👋 Hello! I am your Laptop Usage Tracker bot. Use the following commands:\n\n"
         "• /usage - Get today's latest system usage report.\n"
-        "• /app_usage - See total time spent on each app today.\n"
-        "• /total_time - See your total on-screen time today.\n"
-        "• /top5_apps - Get a list of the top 5 most used applications today.\n\n"
-        "💡 *New Command:* /daily_report `<YYYY-MM-DD>` to view a summary for a specific date (e.g., `/daily_report 2023-10-26`)."
+        "• /appusage - See total time spent on each app today.\n"
+        "• /totaltime - See your total on-screen time today.\n"
+        "• /top5apps - Get a list of the top 5 most used applications today.\n"
+        "• /dailyreport `<YYYY-MM-DD>`: View a summary for a specific date (e.g., `/dailyreport 2023-10-26`).\n"
+        "• /alltimeusage: Get a summary of your total usage across all recorded days."
     )
     await update.message.reply_text(message, parse_mode='Markdown')
 
@@ -175,17 +173,60 @@ async def daily_report_command(update: Update, context: ContextTypes.DEFAULT_TYP
             total_on_screen_time = sum(app_data.values())
             formatted_total_time = format_seconds_to_hms(total_on_screen_time)
             sorted_apps = sorted(app_data.items(), key=lambda item: item[1], reverse=True)
-
+            
             message += f"--- *Application Usage* ---\n"
             message += f"• Total Time On-Screen: `{formatted_total_time}`\n\n"
             message += f"*Top Apps for the Day:*\n"
             for i, (app, duration) in enumerate(sorted_apps[:5]):
                 message += f"{i + 1}. `{app}`: `{format_seconds_to_hms(duration)}`\n"
-
+        
         await update.message.reply_text(message, parse_mode='Markdown')
 
     except Exception as e:
         await update.message.reply_text(f"Error fetching daily report: {e}")
+
+async def all_time_usage_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Calculates and sends the total all-time usage report from Firebase."""
+    try:
+        # Get all app usage data across all dates
+        all_app_usage_ref = db.reference('app_usage')
+        all_data = all_app_usage_ref.get()
+
+        if not all_data:
+            await update.message.reply_text("No all-time usage data found. Please run the tracking script first.")
+            return
+
+        # Flatten the data from all dates into a single dictionary
+        total_app_usage = {}
+        for date, daily_apps in all_data.items():
+            if isinstance(daily_apps, dict):
+                for app, duration in daily_apps.items():
+                    total_app_usage[app] = total_app_usage.get(app, 0) + duration
+
+        if not total_app_usage:
+            await update.message.reply_text("No all-time app usage data found.")
+            return
+
+        # Calculate total on-screen time
+        total_seconds = sum(total_app_usage.values())
+        formatted_total_time = format_seconds_to_hms(total_seconds)
+
+        # Sort apps by duration and get the top 5
+        sorted_apps = sorted(total_app_usage.items(), key=lambda item: item[1], reverse=True)[:5]
+
+        message = (
+            f"🌐 *All-Time Usage Report* 🌐\n\n"
+            f"--- *Application Usage* ---\n"
+            f"• Total Time On-Screen: `{formatted_total_time}`\n\n"
+            f"*Top Apps Overall:*\n"
+        )
+        for i, (app, duration) in enumerate(sorted_apps):
+            message += f"{i + 1}. `{app}`: `{format_seconds_to_hms(duration)}`\n"
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+
+    except Exception as e:
+        await update.message.reply_text(f"Error fetching all-time usage: {e}")
 
 
 if __name__ == "__main__":
@@ -195,9 +236,12 @@ if __name__ == "__main__":
         application = Application.builder().token(BOT_TOKEN).build()
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("usage", usage_command))
-        application.add_handler(CommandHandler("app_usage", app_usage_command))
-        application.add_handler(CommandHandler("total_time", total_time_command))
-        application.add_handler(CommandHandler("top5_apps", top5_apps_command))
-        application.add_handler(CommandHandler("daily_report", daily_report_command))
+        application.add_handler(CommandHandler(["app_usage", "appusage"], app_usage_command))
+        application.add_handler(CommandHandler(["total_time", "totaltime"], total_time_command))
+        application.add_handler(CommandHandler(["top5_apps", "top5apps"], top5_apps_command))
+        application.add_handler(CommandHandler(["daily_report", "dailyreport"], daily_report_command))
+        application.add_handler(CommandHandler(["all_time_usage", "alltimeusage"], all_time_usage_command))
         print("Bot is running. Press Ctrl-C to stop.")
         application.run_polling()
+
+
